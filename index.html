@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>QR出席管理</title>
+    <!-- html5-qrcodeライブラリ -->
+    <script src="https://unpkg.com/html5-qrcode@2.3.7/html5-qrcode.min.js"></script>
+    <style>
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen,
+               Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
+}
+body {
+  background-color: #f1f1f1;
+  color: #333;
+  height: 100vh;
+  overflow: hidden;
+}
+.container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  position: relative;
+}
+.header {
+  background: linear-gradient(to right, #ff5f6d, #7539cc);
+  color: white;
+  text-align: center;
+  padding: 15px;
+  z-index: 10;
+}
+.event-title {
+  font-size: 1.5rem;
+  font-weight: bold;
+  margin-bottom: 5px;
+}
+.event-date {
+  font-size: 1.1rem;
+  opacity: 0.9;
+}
+.scanner-wrapper {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+}
+#reader-container {
+  height: 100%;
+  background: #000;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  position: relative;
+  overflow: hidden;
+}
+#reader {
+  width: 100%;
+  max-width: 400px;
+  height: 100%;
+  max-height: calc(100% - 150px);
+}
+#reader video {
+  object-fit: cover;
+  width: 100%;
+  height: 100%;
+}
+#reader canvas {
+  position: absolute !important;
+}
+#reader .qr-region {
+  border: 2px solid #fff !important;
+  box-shadow: 0 0 0 2000px rgba(0, 0, 0, 0.5);
+}
+#scan-instruction {
+  position: absolute;
+  top: 15px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: white;
+  font-size: 1rem;
+  background: rgba(0,0,0,0.6);
+  padding: 8px 15px;
+  border-radius: 20px;
+  z-index: 20;
+  text-align: center;
+  min-width: 220px;
+}
+#scan-success {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background-color: rgba(0, 180, 0, 0.8);
+  color: white;
+  font-size: 1.3rem;
+  font-weight: bold;
+  padding: 15px 25px;
+  border-radius: 10px;
+  z-index: 30;
+  text-align: center;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  pointer-events: none;
+}
+.success-visible {
+  opacity: 1 !important;
+}
+.stats-overlay {
+  position: absolute;
+  bottom: 70px;
+  left: 0;
+  right: 0;
+  background: rgba(0, 0, 0, 0.7);
+  color: white;
+  padding: 10px;
+  text-align: center;
+  z-index: 20;
+}
+.action-button-container {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: #333;
+  padding: 10px;
+  text-align: center;
+  z-index: 20;
+}
+.result-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.85);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 100;
+}
+.result-content {
+  background-color: white;
+  padding: 25px;
+  border-radius: 12px;
+  width: 85%;
+  max-width: 400px;
+  text-align: center;
+  box-shadow: 0 0 30px rgba(0, 0, 0, 0.5);
+}
+.hidden {
+  display: none !important;
+}
+.message {
+  font-size: 1.4rem;
+  font-weight: bold;
+  white-space: pre-wrap;
+  margin-bottom: 20px;
+}
+.attendance-stats {
+  font-size: 1.3rem;
+  font-weight: bold;
+  margin-bottom: 5px;
+}
+.action-button {
+  background: linear-gradient(to right, #ff5f6d, #7539cc);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  padding: 15px 30px;
+  font-size: 1.2rem;
+  font-weight: bold;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+  width: 80%;
+  max-width: 300px;
+  display: block;
+  margin-left: auto;
+  margin-right: auto;
+}
+.fixed-action-button {
+  background: linear-gradient(to right, #ff5f6d, #7539cc);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  padding: 15px 30px;
+  font-size: 1.2rem;
+  font-weight: bold;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+  width: 90%;
+  max-width: 400px;
+  display: inline-block;
+}
+.action-button:hover, .fixed-action-button:hover {
+  opacity: 0.9;
+  transform: translateY(-2px);
+  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.3);
+}
+.action-button:active, .fixed-action-button:active {
+  transform: translateY(1px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+.button-highlight {
+  animation: pulse 1.5s infinite;
+}
+@keyframes pulse {
+  0% {
+    transform: scale(1);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+  }
+  50% {
+    transform: scale(1.05);
+    box-shadow: 0 8px 16px rgba(255, 95, 109, 0.4);
+  }
+  100% {
+    transform: scale(1);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+  }
+}
+.debug-log {
+  position: fixed;
+  bottom: 100px;
+  left: 10px;
+  color: yellow;
+  font-size: 10px;
+  z-index: 1000;
+  background: rgba(0,0,0,0.5);
+  padding: 5px;
+  border-radius: 5px;
+  display: none;
+}
+    </style>
+  </head>
+
+  <body>
+    <div class="container">
+      <!-- ヘッダー：イベント情報 -->
+      <div class="header">
+        <div id="eventName" class="event-title">Loading...</div>
+        <div id="eventDate" class="event-date"></div>
+      </div>
+
+      <!-- スキャンエリア -->
+      <div class="scanner-wrapper">
+        <div id="reader-container">
+          <div id="reader"></div>
+          <div id="scan-instruction">QRコードをスキャンしてください</div>
+
+          <!-- スキャン成功時の一時表示 -->
+          <div id="scan-success">スキャン成功！</div>
+
+          <!-- 下部の固定オーバーレイ（出席者数） -->
+          <div class="stats-overlay">
+            <div class="attendance-stats">
+              出席者数: <span id="fixed-attend-count">0</span>/<span id="fixed-reserve-count">0</span>人
+            </div>
+          </div>
+
+          <!-- 次をスキャンボタン -->
+          <div class="action-button-container">
+            <button id="fixedNextScanButton" class="fixed-action-button">次をスキャン</button>
+          </div>
+
+          <!-- デバッグ用表示 -->
+          <div id="debug-log" class="debug-log"></div>
+        </div>
+
+        <!-- 結果オーバーレイ -->
+        <div id="result" class="result-overlay hidden">
+          <div class="result-content">
+            <div id="result-message" class="message"></div>
+            <div class="attendance-stats" style="margin: 15px 0; color: #333;">
+              出席者数: <span id="overlay-attend-count">0</span>/<span id="overlay-reserve-count">0</span>人
+            </div>
+            <button id="nextScanButton" class="action-button button-highlight">次をスキャン</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // ===== GAS Web App のURLをここに設定 =====
+      // GASを「ウェブアプリとしてデプロイ」したときのURLを貼り付ける
+      const GAS_URL = 'https://script.google.com/macros/s/AKfycbzqtkYoeDYVJ0YdkNTUBRSV-9XEvJISRi7I5afxuYIj0VnD-2adpiYH96jR54v3B0V6/exec';
+      // =========================================
+
+      let html5QrCode = null;
+      let scannerActive = false;
+      let resultTimeout = null;
+      let processingQR = false;
+      let lastScannedCode = '';
+      let lastScanTime = 0;
+      let successNotificationTimeout = null;
+      let debugMode = false; // trueにするとデバッグログを表示
+
+      // ページ読み込み時
+      window.onload = function() {
+        fetchEventInfo();
+
+        // 少し遅延してカメラ起動
+        setTimeout(function() {
+          initQrScanner();
+        }, 500);
+
+        document.getElementById('nextScanButton').addEventListener('click', function() {
+          debugLog('結果画面の「次をスキャン」ボタンがクリックされました');
+          resetScanner();
+        });
+        document.getElementById('fixedNextScanButton').addEventListener('click', function() {
+          debugLog('下部固定「次をスキャン」ボタンがクリックされました');
+          processingQR = false;
+          resetScannerAndRefreshData();
+        });
+      };
+
+      // デバッグログ表示
+      function debugLog(msg) {
+        console.log(msg);
+        if (debugMode) {
+          const logElement = document.getElementById('debug-log');
+          logElement.style.display = 'block';
+          logElement.textContent = msg;
+        }
+      }
+
+      // イベント情報をGAS APIから取得
+      function fetchEventInfo() {
+        debugLog('イベント情報取得開始');
+        fetch(GAS_URL + '?action=getEventInfo')
+          .then(function(res) { return res.json(); })
+          .then(function(info) { updateEventInfo(info); })
+          .catch(function(err) {
+            debugLog('イベント情報取得エラー: ' + err);
+            document.getElementById('eventName').textContent = '取得エラー';
+          });
+      }
+
+      // 取得したイベント情報を画面に反映
+      function updateEventInfo(info) {
+        debugLog('イベント情報: ' + JSON.stringify(info));
+        document.getElementById('eventName').textContent = info.eventName || 'イベント名';
+        document.getElementById('eventDate').textContent = info.eventDate || '';
+
+        const reserveCount = info.reserveCount || 0;
+        const attendCount = info.attendCount || 0;
+        document.getElementById('fixed-reserve-count').textContent = reserveCount;
+        document.getElementById('fixed-attend-count').textContent = attendCount;
+        document.getElementById('overlay-reserve-count').textContent = reserveCount;
+        document.getElementById('overlay-attend-count').textContent = attendCount;
+      }
+
+      // スキャナ初期化
+      function initQrScanner() {
+        debugLog('スキャナー初期化開始');
+        if (html5QrCode) {
+          try {
+            html5QrCode.stop();
+          } catch (e) {
+            debugLog('スキャナー停止エラー: ' + e.toString());
+          }
+          html5QrCode = null;
+        }
+
+        document.getElementById('scan-instruction').textContent = 'カメラ起動中...';
+        processingQR = false;
+        scannerActive = false;
+
+        try {
+          html5QrCode = new Html5Qrcode('reader');
+          const config = {
+            fps: 10,
+            qrbox: { width: 250, height: 250 },
+            aspectRatio: 1.0,
+            formatsToSupport: [ Html5QrcodeSupportedFormats.QR_CODE ]
+          };
+
+          html5QrCode.start(
+            { facingMode: 'environment' },
+            config,
+            onScanSuccess,
+            onScanFailure
+          )
+          .then(function() {
+            scannerActive = true;
+            debugLog('カメラ起動成功');
+            document.getElementById('scan-instruction').textContent = 'QRコードをスキャンしてください';
+          })
+          .catch(function(err) {
+            debugLog('カメラ起動エラー: ' + err.toString());
+            document.getElementById('scan-instruction').textContent = 'カメラエラー: ' + err.message;
+          });
+        } catch (err) {
+          debugLog('スキャナー初期化エラー: ' + err.toString());
+          document.getElementById('scan-instruction').textContent = '初期化エラー';
+        }
+      }
+
+      function onScanFailure(error) {
+        // 頻発するためログ出力しない
+      }
+
+      // スキャン成功時
+      function onScanSuccess(decodedText) {
+        debugLog('読み取り成功: ' + decodedText);
+
+        if (processingQR) {
+          debugLog('処理中のため無視');
+          return;
+        }
+
+        const now = Date.now();
+        if (decodedText === lastScannedCode && (now - lastScanTime) < 2000) {
+          debugLog('同一QRコードの連続スキャンを防止');
+          return;
+        }
+        lastScannedCode = decodedText;
+        lastScanTime = now;
+
+        processingQR = true;
+        showSuccessNotification();
+        document.getElementById('scan-instruction').textContent = 'QRコード読み取り中...';
+
+        if (resultTimeout) {
+          clearTimeout(resultTimeout);
+          resultTimeout = null;
+        }
+
+        // GAS APIにQRコードを送信
+        const url = GAS_URL + '?action=processQRCode&code=' + encodeURIComponent(decodedText);
+        fetch(url)
+          .then(function(res) { return res.json(); })
+          .then(function(result) {
+            debugLog('QRコード処理成功: ' + JSON.stringify(result));
+            processResult(result);
+          })
+          .catch(function(err) {
+            debugLog('QRコード処理エラー: ' + err);
+            document.getElementById('scan-instruction').textContent = '処理エラー';
+            document.getElementById('result-message').textContent = '処理エラーが発生しました。';
+            document.getElementById('result').classList.remove('hidden');
+            processingQR = false;
+          });
+      }
+
+      // スキャン成功の一時通知
+      function showSuccessNotification() {
+        if (successNotificationTimeout) {
+          clearTimeout(successNotificationTimeout);
+        }
+        const successElement = document.getElementById('scan-success');
+        successElement.classList.add('success-visible');
+        successNotificationTimeout = setTimeout(function() {
+          successElement.classList.remove('success-visible');
+        }, 1000);
+      }
+
+      // 結果表示
+      function processResult(result) {
+        let msg = '';
+        if (result.success) {
+          if (result.alreadyAttended) {
+            msg = result.name + ' 様\n既に出席登録済みです。';
+          } else {
+            msg = result.name + ' 様<br>ご出席登録が完了しました。';
+          }
+
+          if (result.group) {
+            msg += '<br><span style="font-weight:bold; font-size:1.2rem; color:#d00;">グループ: ' + result.group + '</span>';
+          }
+        } else {
+          msg = result.message || 'エラーが発生しました';
+        }
+
+        // 人数表示更新
+        const attendCount = result.attendCount || '0';
+        const reserveCount = result.totalCount || '0';
+        document.getElementById('fixed-attend-count').textContent = attendCount;
+        document.getElementById('fixed-reserve-count').textContent = reserveCount;
+        document.getElementById('overlay-attend-count').textContent = attendCount;
+        document.getElementById('overlay-reserve-count').textContent = reserveCount;
+
+        if (result.eventName) document.getElementById('eventName').textContent = result.eventName;
+        if (result.eventDate) document.getElementById('eventDate').textContent = result.eventDate;
+
+        document.getElementById('result-message').innerHTML = msg;
+        document.getElementById('result').classList.remove('hidden');
+        document.getElementById('nextScanButton').classList.add('button-highlight');
+        document.getElementById('scan-instruction').textContent = 'QRコードをスキャンしてください';
+      }
+
+      // 次のスキャンへ
+      function resetScanner() {
+        debugLog('スキャナーリセット');
+        if (resultTimeout) {
+          clearTimeout(resultTimeout);
+          resultTimeout = null;
+        }
+        document.getElementById('result').classList.add('hidden');
+        processingQR = false;
+        document.getElementById('scan-instruction').textContent = 'QRコードをスキャンしてください';
+      }
+
+      // スキャナーリセット＋データ更新
+      function resetScannerAndRefreshData() {
+        debugLog('スキャナーリセット & データ更新');
+        resetScanner();
+        fetchEventInfo();
+
+        if (html5QrCode) {
+          html5QrCode.stop().then(function() {
+            debugLog('カメラ停止成功→再起動');
+            setTimeout(function() { initQrScanner(); }, 500);
+          }).catch(function(err) {
+            debugLog('カメラ停止エラー: ' + err.toString() + ' →再起動');
+            setTimeout(function() { initQrScanner(); }, 500);
+          });
+        } else {
+          debugLog('html5QrCodeが存在しないため初期化');
+          setTimeout(function() { initQrScanner(); }, 500);
+        }
+      }
+    </script>
+  </body>
+</html>
