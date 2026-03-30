@@ -285,9 +285,12 @@ body {
     </div>
 
     <script>
-      // ===== GAS Web App のURLをここに設定 =====
-      // GASを「ウェブアプリとしてデプロイ」したときのURLを貼り付ける
-      const GAS_URL = 'https://script.google.com/macros/s/AKfycbzqtkYoeDYVJ0YdkNTUBRSV-9XEvJISRi7I5afxuYIj0VnD-2adpiYH96jR54v3B0V6/exec';
+      // ===== GAS Web App のURL（URLパラメータ ?id= からデプロイメントIDを取得） =====
+      const params = new URLSearchParams(window.location.search);
+      const deployId = params.get('id');
+      const GAS_URL = deployId
+        ? `https://script.google.com/macros/s/${deployId}/exec`
+        : '';
       // =========================================
 
       let html5QrCode = null;
@@ -301,6 +304,11 @@ body {
 
       // ページ読み込み時
       window.onload = function() {
+        if (!deployId) {
+          document.getElementById('eventName').textContent = 'URLにIDが指定されていません';
+          document.getElementById('scan-instruction').textContent = '?id=デプロイメントID をURLに追加してください';
+          return;
+        }
         fetchEventInfo();
 
         // 少し遅延してカメラ起動
