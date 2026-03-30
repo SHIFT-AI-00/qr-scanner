@@ -341,11 +341,21 @@ body {
       function fetchEventInfo() {
         debugLog('イベント情報取得開始');
         fetch(GAS_URL + '?action=getEventInfo')
-          .then(function(res) { return res.json(); })
+          .then(function(res) {
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            return res.text();
+          })
+          .then(function(text) {
+            try {
+              return JSON.parse(text);
+            } catch (e) {
+              throw new Error('JSONパースエラー: ' + text.substring(0, 100));
+            }
+          })
           .then(function(info) { updateEventInfo(info); })
           .catch(function(err) {
             debugLog('イベント情報取得エラー: ' + err);
-            document.getElementById('eventName').textContent = '取得エラー';
+            document.getElementById('eventName').textContent = 'エラー: ' + err.message;
           });
       }
 
@@ -442,7 +452,17 @@ body {
         // GAS APIにQRコードを送信
         const url = GAS_URL + '?action=processQRCode&code=' + encodeURIComponent(decodedText);
         fetch(url)
-          .then(function(res) { return res.json(); })
+          .then(function(res) {
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            return res.text();
+          })
+          .then(function(text) {
+            try {
+              return JSON.parse(text);
+            } catch (e) {
+              throw new Error('JSONパースエラー: ' + text.substring(0, 100));
+            }
+          })
           .then(function(result) {
             debugLog('QRコード処理成功: ' + JSON.stringify(result));
             processResult(result);
@@ -450,7 +470,7 @@ body {
           .catch(function(err) {
             debugLog('QRコード処理エラー: ' + err);
             document.getElementById('scan-instruction').textContent = '処理エラー';
-            document.getElementById('result-message').textContent = '処理エラーが発生しました。';
+            document.getElementById('result-message').textContent = 'エラー: ' + err.message;
             document.getElementById('result').classList.remove('hidden');
             processingQR = false;
           });
