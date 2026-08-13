@@ -4,8 +4,19 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>QR出席管理</title>
-    <!-- html5-qrcodeライブラリ -->
-    <script src="https://unpkg.com/html5-qrcode@2.3.7/html5-qrcode.min.js"></script>
+
+    <!-- GAS Web App への接続を先に確立しておく（DNS解決＋TLSハンドシェイクの前払い）。
+         GAS は /exec が script.googleusercontent.com へ毎回302リダイレクトするため、両ホストを温める -->
+    <link rel="preconnect" href="https://script.google.com" crossorigin>
+    <link rel="preconnect" href="https://script.googleusercontent.com" crossorigin>
+    <link rel="dns-prefetch" href="https://script.google.com">
+    <link rel="dns-prefetch" href="https://script.googleusercontent.com">
+
+    <!-- html5-qrcodeライブラリ（v2.3.7 を vendor/ に同梱＝GitHub Pages と同一オリジンから配信）
+         CDN（unpkg）は国内エッジが弱く、会場Wi-Fi混雑時に初回読み込みが数百ms〜数秒かかるため同梱に変更。
+         バージョンは動作確認済みの 2.3.7 固定（npm の html5-qrcode@2.3.7 の html5-qrcode.min.js と同一ファイル）。
+         defer: HTMLパースをブロックしない。DOMContentLoaded より前に必ず実行されるため起動処理から参照できる -->
+    <script src="vendor/html5-qrcode.min.js" defer></script>
     <style>
 * {
   box-sizing: border-box;
@@ -103,7 +114,8 @@ body {
   z-index: 30;
   text-align: center;
   opacity: 0;
-  transition: opacity 0.3s ease;
+  /* 読み取り直後の反応を即座にするためフェードを 0.3s → 0.08s に短縮（見た目は同じ） */
+  transition: opacity 0.08s ease;
   pointer-events: none;
 }
 .success-visible {
@@ -235,6 +247,43 @@ body {
   border-radius: 5px;
   display: none;
 }
+
+/* 受付フロア・VIP名札の案内バナー（区分ごとに色分け） */
+.reception-banner {
+  display: none;
+  margin-bottom: 12px;
+  padding: 14px 12px;
+  border-radius: 10px;
+  font-weight: bold;
+  line-height: 1.4;
+  text-align: center;
+}
+.reception-banner.show { display: block; }
+.reception-banner-vip {
+  background: #fff4cc;
+  border: 3px solid #d4a900;
+  color: #6b5300;
+  font-size: 1.25rem;
+}
+.reception-banner-b2f {
+  background: #ffe3d6;
+  border: 3px solid #e05a1f;
+  color: #7a2e0a;
+  font-size: 1.15rem;
+}
+.reception-banner-conflict {
+  background: #ffd6d6;
+  border: 3px dashed #cc0000;
+  color: #7a0000;
+  font-size: 1.1rem;
+}
+.reception-category {
+  display: inline-block;
+  margin-top: 6px;
+  font-size: 0.85rem;
+  font-weight: normal;
+  opacity: 0.85;
+}
     </style>
   </head>
 
@@ -274,6 +323,7 @@ body {
         <!-- 結果オーバーレイ -->
         <div id="result" class="result-overlay hidden">
           <div class="result-content">
+            <div id="reception-banner" class="reception-banner"></div>
             <div id="result-message" class="message"></div>
             <div class="attendance-stats" style="margin: 15px 0; color: #333;">
               出席者数: <span id="overlay-attend-count">0</span>/<span id="overlay-reserve-count">0</span>人
@@ -293,6 +343,9 @@ body {
         : '';
       // =========================================
 
+      // 同梱ライブラリが読めなかったときだけ使う保険のCDN URL（バージョンは同梱と同じ 2.3.7）
+      const QR_LIB_FALLBACK_URL = 'https://unpkg.com/html5-qrcode@2.3.7/html5-qrcode.min.js';
+
       let html5QrCode = null;
       let scannerActive = false;
       let resultTimeout = null;
@@ -300,32 +353,53 @@ body {
       let lastScannedCode = '';
       let lastScanTime = 0;
       let successNotificationTimeout = null;
+      let audioCtx = null; // スキャン音用。初回タップで生成・解除する（モバイルは自動再生不可）
       let debugMode = false; // trueにするとデバッグログを表示
 
-      // ページ読み込み時
-      window.onload = function() {
+      // 起動処理（DOMContentLoaded で実行。window.onload は画像・video等の読み込み完了まで待つため使わない）
+      function boot() {
         if (!deployId) {
           document.getElementById('eventName').textContent = 'URLにIDが指定されていません';
           document.getElementById('scan-instruction').textContent = '?id=デプロイメントID をURLに追加してください';
           return;
         }
-        fetchEventInfo();
-
-        // 少し遅延してカメラ起動
-        setTimeout(function() {
-          initQrScanner();
-        }, 500);
 
         document.getElementById('nextScanButton').addEventListener('click', function() {
           debugLog('結果画面の「次をスキャン」ボタンがクリックされました');
+          unlockFeedback();
           resetScanner();
         });
         document.getElementById('fixedNextScanButton').addEventListener('click', function() {
           debugLog('下部固定「次をスキャン」ボタンがクリックされました');
+          unlockFeedback();
           processingQR = false;
           resetScannerAndRefreshData();
         });
-      };
+
+        // 画面の初回タップでスキャン音を有効化（iOS/Android はユーザー操作なしに音を鳴らせない）
+        document.addEventListener('pointerdown', unlockFeedback, { once: true });
+
+        // カメラ起動。旧実装の setTimeout 500ms は不要（ライブラリは defer で既に読み込み済み）
+        whenQrLibReady(initQrScanner);
+      }
+
+      // ライブラリの準備待ち。同梱＋defer なので通常は待ち時間ゼロで即 callback。
+      // vendor/ の配信に失敗した場合のみ CDN へフォールバックする（当日の全滅を防ぐ保険）
+      function whenQrLibReady(callback) {
+        if (typeof Html5Qrcode !== 'undefined') {
+          callback();
+          return;
+        }
+        debugLog('同梱ライブラリ未読込→CDNへフォールバック');
+        document.getElementById('scan-instruction').textContent = 'ライブラリ読み込み中...';
+        const fallback = document.createElement('script');
+        fallback.src = QR_LIB_FALLBACK_URL;
+        fallback.onload = function() { callback(); };
+        fallback.onerror = function() {
+          document.getElementById('scan-instruction').textContent = 'ライブラリ読み込みエラー（通信を確認してください）';
+        };
+        document.head.appendChild(fallback);
+      }
 
       // デバッグログ表示
       function debugLog(msg) {
@@ -337,10 +411,12 @@ body {
         }
       }
 
-      // イベント情報をGAS APIから取得
-      function fetchEventInfo() {
-        debugLog('イベント情報取得開始');
-        fetch(GAS_URL + '?action=getEventInfo')
+      // GAS API 呼び出しの共通処理（fetch → テキスト取得 → JSONパース）
+      // 注: GAS の /exec は script.googleusercontent.com への302リダイレクトを毎回返す。
+      //     リダイレクト先URLの user_content_key は毎回変わるため、クライアント側では往復を除去できない。
+      //     代わりに head の preconnect で両ホストのDNS/TLSを事前確立してリダイレクト分のコストを削っている。
+      function requestJson(url) {
+        return fetch(url, { cache: 'no-store', redirect: 'follow' })
           .then(function(res) {
             if (!res.ok) throw new Error('HTTP ' + res.status);
             return res.text();
@@ -351,7 +427,13 @@ body {
             } catch (e) {
               throw new Error('JSONパースエラー: ' + text.substring(0, 100));
             }
-          })
+          });
+      }
+
+      // イベント情報をGAS APIから取得
+      function fetchEventInfo() {
+        debugLog('イベント情報取得開始');
+        requestJson(GAS_URL + '?action=getEventInfo')
           .then(function(info) { updateEventInfo(info); })
           .catch(function(err) {
             debugLog('イベント情報取得エラー: ' + err);
@@ -411,7 +493,8 @@ body {
           })
           .catch(function(err) {
             debugLog('カメラ起動エラー: ' + err.toString());
-            document.getElementById('scan-instruction').textContent = 'カメラエラー: ' + err.message;
+            // html5-qrcode は文字列で reject することがあるため err.message が undefined になるのを防ぐ
+            document.getElementById('scan-instruction').textContent = 'カメラエラー: ' + (err && err.message ? err.message : err);
           });
         } catch (err) {
           debugLog('スキャナー初期化エラー: ' + err.toString());
@@ -441,6 +524,9 @@ body {
         lastScanTime = now;
 
         processingQR = true;
+        // 通信を待たずに「読めた」ことを即座に伝える（バイブ＋音＋緑表示）。
+        // GASのレスポンスは2〜4秒かかるため、この即時フィードバックが体感速度を大きく左右する
+        feedbackScanned();
         showSuccessNotification();
         document.getElementById('scan-instruction').textContent = 'QRコード読み取り中...';
 
@@ -451,18 +537,7 @@ body {
 
         // GAS APIにQRコードを送信
         const url = GAS_URL + '?action=processQRCode&code=' + encodeURIComponent(decodedText);
-        fetch(url)
-          .then(function(res) {
-            if (!res.ok) throw new Error('HTTP ' + res.status);
-            return res.text();
-          })
-          .then(function(text) {
-            try {
-              return JSON.parse(text);
-            } catch (e) {
-              throw new Error('JSONパースエラー: ' + text.substring(0, 100));
-            }
-          })
+        requestJson(url)
           .then(function(result) {
             debugLog('QRコード処理成功: ' + JSON.stringify(result));
             processResult(result);
@@ -476,6 +551,48 @@ body {
           });
       }
 
+      // ===== 読み取りフィードバック（バイブ＋スキャン音） =====
+      // 会場は騒がしいためバイブを主、音を副とする。GASのレスポンス待ち中でも
+      // 「読めた」ことが受付担当に伝わるので、体感の待ち時間が大きく縮む。
+
+      // AudioContext の生成・解除。モバイルはユーザー操作なしに音を鳴らせないため初回タップで呼ぶ
+      function unlockFeedback() {
+        try {
+          const Ctx = window.AudioContext || window.webkitAudioContext;
+          if (!Ctx) return;
+          if (!audioCtx) audioCtx = new Ctx();
+          if (audioCtx.state === 'suspended') audioCtx.resume();
+        } catch (e) {
+          debugLog('音声初期化スキップ: ' + e.toString());
+        }
+      }
+
+      // 読み取り確定の合図。fetch より先に同期実行するので通信状況に影響されない
+      function feedbackScanned() {
+        // バイブ（Android Chrome等。iOS Safari は navigator.vibrate 非対応なので自動的にスキップされる）
+        if (navigator.vibrate) {
+          try { navigator.vibrate(80); } catch (e) { debugLog('バイブ不可: ' + e.toString()); }
+        }
+        // スキャン音（画面を一度タップした後のみ鳴る。鳴らなくても動作に影響なし）
+        if (!audioCtx || audioCtx.state !== 'running') return;
+        try {
+          const now = audioCtx.currentTime;
+          const osc = audioCtx.createOscillator();
+          const gain = audioCtx.createGain();
+          osc.type = 'sine';
+          osc.frequency.value = 1200; // レジのピッと同系の高さ
+          gain.gain.setValueAtTime(0.0001, now);
+          gain.gain.exponentialRampToValueAtTime(0.3, now + 0.01);
+          gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.12);
+          osc.connect(gain);
+          gain.connect(audioCtx.destination);
+          osc.start(now);
+          osc.stop(now + 0.13);
+        } catch (e) {
+          debugLog('スキャン音エラー: ' + e.toString());
+        }
+      }
+
       // スキャン成功の一時通知
       function showSuccessNotification() {
         if (successNotificationTimeout) {
@@ -486,6 +603,44 @@ body {
         successNotificationTimeout = setTimeout(function() {
           successElement.classList.remove('success-visible');
         }, 1000);
+      }
+
+      // 受付フロア・VIP名札の案内バナー
+      // conflicted はサーバー側（resolveReceptionInfo_ 経由）の判定をそのまま使う。
+      // 通常の5区分（VIP/会員/非会員/招待/法人）では起きず、
+      // 手入力の表記ゆれ（例:「VIP招待枠」）に対する保険として立つ
+      function renderReceptionBanner(result) {
+        const banner = document.getElementById('reception-banner');
+        banner.className = 'reception-banner';
+        banner.innerHTML = '';
+
+        if (!result.success) {
+          return;
+        }
+
+        const isB2F = !!result.isB2F;
+        const needsVipBadge = !!result.needsVipBadge;
+        const conflicted = !!result.conflicted;
+        const categoryLabel = result.category
+          ? '<div class="reception-category">区分: ' + result.category + '</div>'
+          : '';
+
+        if (conflicted) {
+          banner.classList.add('reception-banner-conflict');
+          banner.innerHTML = '⚠️ VIP かつ地下2階案内の対象です<br>運用を事務局に確認してください' + categoryLabel;
+        } else if (needsVipBadge) {
+          banner.classList.add('reception-banner-vip');
+          banner.innerHTML = '⭐ VIP名札を必ずお渡しください' + categoryLabel;
+        } else if (isB2F) {
+          banner.classList.add('reception-banner-b2f');
+          banner.innerHTML = '➡️ 地下2階受付の対象です<br>1階にお越しの場合はご案内をお願いします' + categoryLabel;
+        } else if (categoryLabel) {
+          banner.innerHTML = categoryLabel;
+        } else {
+          return;
+        }
+
+        banner.classList.add('show');
       }
 
       // 結果表示
@@ -504,6 +659,8 @@ body {
         } else {
           msg = result.message || 'エラーが発生しました';
         }
+
+        renderReceptionBanner(result);
 
         // 人数表示更新
         const attendCount = result.attendCount || '0';
@@ -540,18 +697,63 @@ body {
         resetScanner();
         fetchEventInfo();
 
+        // カメラが動いたままなら停止→再起動しない。
+        // 旧実装は「次をスキャン」のたびに stop→500ms待ち→再init でカメラを作り直しており、
+        // 1回あたり1秒以上かかっていた。スキャン成功時にカメラは止めていないので、
+        // 状態が SCANNING ならそのまま読み取り継続で問題ない。
+        if (html5QrCode && isScanning()) {
+          debugLog('カメラ稼働中のため再起動しない');
+          scannerActive = true;
+          return;
+        }
+
+        // 停止済み・異常状態のときだけ作り直す（復旧経路）
         if (html5QrCode) {
           html5QrCode.stop().then(function() {
             debugLog('カメラ停止成功→再起動');
-            setTimeout(function() { initQrScanner(); }, 500);
+            html5QrCode = null;
+            restartQrScanner();
           }).catch(function(err) {
             debugLog('カメラ停止エラー: ' + err.toString() + ' →再起動');
-            setTimeout(function() { initQrScanner(); }, 500);
+            html5QrCode = null;
+            restartQrScanner();
           });
         } else {
           debugLog('html5QrCodeが存在しないため初期化');
-          setTimeout(function() { initQrScanner(); }, 500);
+          initQrScanner();
         }
+      }
+
+      // 停止直後の再起動だけは短い待ちを残す（意図的）。
+      // Android の一部端末で videoトラックの解放が stop() の解決より遅れ、
+      // 直後の getUserMedia が NotReadableError になることがあるため、安全側に倒して150msだけ待つ。
+      function restartQrScanner() {
+        setTimeout(initQrScanner, 150);
+      }
+
+      // 現在カメラが読み取り中かを判定（ライブラリの状態を正としてフラグに依存しない）
+      function isScanning() {
+        try {
+          return typeof Html5QrcodeScannerState !== 'undefined'
+            && html5QrCode.getState() === Html5QrcodeScannerState.SCANNING;
+        } catch (e) {
+          debugLog('カメラ状態取得エラー: ' + e.toString());
+          return false;
+        }
+      }
+
+      // ===== 起動 =====
+      // 1) GASへの通信を先に開始する。このスクリプトは body 末尾なので参照する要素は既に存在し、
+      //    DOMContentLoaded（＝カメラ起動）を待たずに投げられる。カメラ起動と通信が並列になり、
+      //    GASインスタンスのウォームアップとTLS確立も先に済む。
+      if (deployId) {
+        fetchEventInfo();
+      }
+      // 2) DOM構築完了でカメラ起動＋ボタン登録
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', boot, { once: true });
+      } else {
+        boot();
       }
     </script>
   </body>
