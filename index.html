@@ -2,7 +2,9 @@
 <html>
   <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <!-- viewport-fit=cover: iPhoneのホームバー領域まで描画を広げる。
+         これを付けないと env(safe-area-inset-*) が常に0になり、下部の見切れを直せない -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>QR出席管理</title>
 
     <!-- GAS Web App への接続を先に確立しておく（DNS解決＋TLSハンドシェイクの前払い）。
@@ -28,7 +30,11 @@
 body {
   background-color: #f1f1f1;
   color: #333;
+  /* 100vh はiOS Safariでツールバーの高さを含まないため、下部が隠れる。
+     100dvh（動的ビューポート）ならツールバーの出入りに追随する。
+     dvh 非対応の古いブラウザ向けに 100vh を先に書いて上書きする */
   height: 100vh;
+  height: 100dvh;
   overflow: hidden;
 }
 .container {
@@ -123,7 +129,8 @@ body {
 }
 .stats-overlay {
   position: absolute;
-  bottom: 70px;
+  /* 下のボタン（.action-button-container）が safe-area 分だけ高くなるので、その分も上げる */
+  bottom: calc(70px + env(safe-area-inset-bottom));
   left: 0;
   right: 0;
   background: rgba(0, 0, 0, 0.7);
@@ -138,7 +145,8 @@ body {
   left: 0;
   right: 0;
   background: #333;
-  padding: 10px;
+  /* 下端はホームバー／ツールバーに食われるので、その分を足す（非対応環境では0扱い） */
+  padding: 10px 10px calc(10px + env(safe-area-inset-bottom));
   text-align: center;
   z-index: 20;
 }
