@@ -285,12 +285,23 @@ body {
   color: #7a0000;
   font-size: 1.1rem;
 }
+/* バナーの出ない区分（1階の会員など）用。区分だけが浮かないよう薄い枠を敷く */
+.reception-banner-plain {
+  background: #f4f4f4;
+  border: 1px solid #dcdcdc;
+  color: #333;
+}
+/* 区分は受付での振り分け判断に使うので、混雑時でも一目で読める大きさにする
+   （2026-08-14 「もう少し目立つように」の指示で 0.85rem/normal から変更） */
 .reception-category {
   display: inline-block;
-  margin-top: 6px;
-  font-size: 0.85rem;
-  font-weight: normal;
-  opacity: 0.85;
+  margin-top: 8px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.08);
+  font-size: 1.2rem;
+  font-weight: bold;
+  opacity: 1;
 }
     </style>
   </head>
@@ -643,6 +654,8 @@ body {
           banner.classList.add('reception-banner-b2f');
           banner.innerHTML = '➡️ 地下2階受付の対象です<br>1階にお越しの場合はご案内をお願いします' + categoryLabel;
         } else if (categoryLabel) {
+          // バナーの出ない区分（1階の会員など）。枠が無いと区分だけが浮くので薄い枠を付ける
+          banner.classList.add('reception-banner-plain');
           banner.innerHTML = categoryLabel;
         } else {
           return;
